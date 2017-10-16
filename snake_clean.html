@@ -1,0 +1,367 @@
+<html>
+  <head>
+    <script src="./convnet.js"></script>
+    <script src="./chart.js"></script>
+
+  </head>
+  <body>
+    <canvas id="game" width="480" height="480"></canvas>
+    <canvas id="myChart" width="400px"; height="400px"></canvas>
+
+    <script>
+    //close chart label
+    Chart.defaults.global.legend.display = false;
+    window.onload=function() {
+
+        canv2=document.getElementById("game");
+        ctx2=canv2.getContext("2d");
+        document.addEventListener("keydown",keyPush);
+        ctx2.fillStyle="black";
+        ctx2.fillRect(0,0,800,800)
+        setInterval(game2,100);
+        var ctxChart = document.getElementById("myChart").getContext('2d');
+
+        myChart1 = new Chart(ctxChart, {
+          type: 'line',
+          data: {
+            labels: new Array(100).fill(0),
+            datasets: [{
+              label: 'apples',
+              data: new Array(100).fill(0),
+              backgroundColor: "rgba(153,255,51,0.4)"
+            }]
+          },
+          options: {
+            scales: {
+                yAxes: [{
+                    ticks: {
+                        beginAtZero: true
+                    }
+                }]
+            },
+            responsive: false,
+            maintainAspectRatio: false
+          }
+          })
+
+    }
+    //====================ENV=================
+    chartData = new Array(10000).fill(0);
+    setInterval(()=>{
+      let a=chartData.reduce((a,b)=>{return a+b})
+      myChart1.data.datasets[0].data.push(a)
+      myChart1.data.labels.push('M')
+      myChart1.data.datasets[0].data.shift()
+      myChart1.data.labels.shift()
+      myChart1.update()
+    },10000);
+    xwall = 6
+    ywall = 6
+    gridSize=80//grid size
+    frameCount = 0
+    //===============End of ENV===============
+    //==============design pattern============
+    //←	↑	→	↓
+    //                         interact
+    //        [game objects]   <------>   [game objects]   <------>   [game objects]
+    //                                                            pure logics to be managed by "gameScreen"
+    //                                                            to interact with other objects:
+    //                                                              -must have o_ref_action(functions)
+    //                                                            to be managed:
+    //                                                              -must bave property: this.px,this.py,this.vx, this.vy, elem.color[R,G,B]
+    //                                                              -must bave method:  this.update()
+    //             ↓↓↓(management)
+    //          gameScreen
+    //              ↓ generate data(state) needed
+    //            game()
+    //==========end of design pattern=========
+    //============pure functions==============
+    let distance = function(x1, y1, x2, y2) {
+        const xDist = x2 - x1;
+        const yDist = y2 - y1;
+
+        return Math.sqrt(Math.pow(xDist, 2) + Math.pow(yDist, 2));
+    }
+    let collide_1D= function(AA,BB,XX){
+      let Ax = AA
+      let Bx = BB
+      let AB2dist = Math.abs(Ax-Bx)
+      return Math.abs(Ax-XX)+Math.abs(Bx-XX)==AB2dist
+    }
+    //==========pure functions end============
+    //===============declare================
+    function gameScreen(width, height){
+      //basic setting
+      this.width = width
+      this.height = height
+      this.maxValue = 255
+      this.channel_c = 3 //for RGB
+
+      //basic setting(end)
+      this.gameObject = []    //  execute with this.update. expects objects having "update method". expects depth==2 array
+      this.showingObject = [] //  execute with this.dataRender. expects object.px, object.py, object.color[R,G,B]. expects depth==2 array
+
+      this.value2D = [...Array(width).keys()].map(i => Array(height).fill(0).map(i => Array(this.channel_c).fill(0)));
+      //shape of (width, height, channel_c)
+
+    }
+    gameScreen.prototype.dataRender = function(){
+      this.setAll(0)
+      this.showingObject.map((_)=>{
+        _.map((elem)=>{
+          if(0<=elem.px&&elem.px<this.width&&0<=elem.py&&elem.py<this.height){ //allowing objects to be out of range
+            this.value2D[elem.px][elem.py][0]=elem.color[0]
+            this.value2D[elem.px][elem.py][1]=elem.color[1]
+            this.value2D[elem.px][elem.py][2]=elem.color[2]
+          }
+        })
+      })
+    }
+    gameScreen.prototype.update = function(){
+
+      this.gameObject.map((_a)=>{
+        _a.map((elem)=>{
+          elem.update()
+        })
+      })
+    }
+    gameScreen.prototype.setAll = function(value){
+      if(!Array.isArray(value)){ console.assert("value not a Array object.")}
+      this.value2D.map((_a,i)=>{
+          _a.map(  (_b,j)=> {
+            _b.map((_,k)=>{this.value2D[i][j][k]=value})
+          })
+      })
+    }
+    function block(px, py, vx, vy){//block for apple
+    	this.px = px
+    	this.py = py
+    	this.vx = vx
+    	this.vy = vy
+    }
+    //apple
+    function apple(px, py, vx, vy){
+    	this.px = px
+    	this.py = py
+    	this.vx = vx
+    	this.vy = vy
+      this.color = [0,100,100]
+    }
+    apple.prototype.checkSnake = function(snake){//needed to bind 'this'
+      if(this.px==snake.px && this.py==snake.py){
+        this.px=Math.floor(Math.random()*xwall);
+        this.py=Math.floor(Math.random()*xwall);
+        //console.log("got reward");
+        snake.gotreward=true
+      }
+    }
+
+
+
+
+    function snake(x, y, vx, vy){
+    	this.px = x
+    	this.py = y
+    	this.vx = vx
+    	this.vy = vy
+    	this.lifeSpan = 50
+    	this.tail = 5
+    	this.trail=[];
+      this.o_ref_action=[]; //==== o_ref & o_ref_action should "registered" at the same time
+    }
+
+    snake.prototype.checkOutOfBoard = function(){//event
+    	if(this.px<0) {
+    		this.px= xwall-1;
+    	}
+    	if(this.py<0) {
+    		this.py= ywall-1;
+    	}
+    	if(this.px>xwall-1) {
+    		this.px= 0;
+    	}
+    	if(this.py>ywall-1) {
+    		this.py= 0;
+    	}
+    }
+    snake.prototype.update = function(){
+      let newBlock = new block(this.px, this.py)
+      newBlock.color = [50,255,50]
+    	this.trail.push(newBlock)
+
+    	this.px += this.vx
+    	this.py += this.vy
+      this.checkOutOfBoard()
+    	while(this.trail.length>this.tail) {
+    		this.trail.shift();
+      }
+    	this.lifeSpan--
+
+      this.o_ref_action.map((elem)=>{
+          elem(this)
+      })
+
+    }
+    //============End of Declare================
+    //===================network===================
+    //===utils===
+    let array2Vol = function(array2D){
+      let theVol = new convnetjs.Vol(20,20,3,0.0);
+        array2D.map((_,i)=>{
+          _.map((_,j)=>{
+            _.map((_,k)=>{
+              theVol.set(i,j,k,array2D[i][j][k]/255)
+            })
+          })
+        })
+      return theVol
+    }
+    //===end====
+    let network = function(){
+      var layer_defs = [];
+        layer_defs.push({type:'input', out_sx:20, out_sy:20, out_depth:3}); // declare size of input
+        layer_defs.push({type:'conv', sx:5, filters:8, stride:1, pad:2, activation:'relu'});
+        layer_defs.push({type:'conv', sx:5, filters:8, stride:1, pad:2, activation:'relu'});
+        layer_defs.push({type:'regression', num_neurons:5});//softmax wrong
+        // output Vol is of size 1x1x10 here
+
+      this.net = new convnetjs.Net();
+      this.net.makeLayers(layer_defs);
+
+      this.trainer = new convnetjs.SGDTrainer(this.net, {method:'adadelta', batch_size:10, l2_decay:0.001});
+
+      this.gamma= 0.8
+      this.lastActionNum = 0
+      this.lastInput
+      this.lastQQ //'QQ' stands for Quality
+
+    }
+
+    network.prototype.forward_randomAction = function(array2D){ //array2D == state
+      let input = array2Vol(array2D)
+      input.code = Math.random()
+      this.lastQQ = this.net.forward(input)
+      //var indexOfTheMax = this.lastQQ.w.indexOf(Math.max(...this.lastQQ.w));
+      let randonAction = Math.floor(Math.random() * this.lastQQ.w.length)
+
+      this.lastInput = input
+      this.lastActionNum = randonAction
+      actions[randonAction]()
+      chartData.shift()
+      chartData.push(Math.max(...this.lastQQ.w))
+      return this.lastActionNum
+    }
+    network.prototype.forward_bestAction = function(array2D){ //array2D == state
+      let input = array2Vol(array2D)
+      input.code = Math.random()
+      this.lastQQ = this.net.forward(input)
+      var indexOfTheMax = this.lastQQ.w.indexOf(Math.max(...this.lastQQ.w));
+
+      this.lastInput = input
+      this.lastActionNum = indexOfTheMax
+      actions[indexOfTheMax]()
+      return this.lastActionNum
+    }
+    network.prototype.backward = function(newArray2D, award){ //newArray2D == newState
+      newArray2D = array2Vol(newArray2D)
+      let futureQ = this.net.forward(newArray2D)
+      let futureReward= Math.max(...futureQ.w)
+      let target = this.lastQQ.w.slice()
+      target[this.lastActionNum] = award + futureReward*this.gamma//here?
+      let x =this.lastInput.code
+      this.trainer.train(this.lastInput, target)
+    }
+
+    //================end of network===============
+    //================Instance==================
+    let network1 = new network()
+      //game2
+    let snake1 = new snake(10,10, 1,0)
+      snake1.color = [255,0,0]//snake1head
+    let newApple = new apple(1,1,0,0)
+      snake1.o_ref_action.push(newApple.checkSnake.bind(newApple))
+    let gameScreen2 = new gameScreen(20,20)
+      //objects that will upodate itself
+      gameScreen2.gameObject.push([snake1])
+      //objects that will show on the screen
+      gameScreen2.showingObject.push([newApple])
+      gameScreen2.showingObject.push(snake1.trail)
+      gameScreen2.showingObject.push([snake1])
+
+      snake1.gotreward = false
+      snake1.count = 0
+      snake1.randomChance = 0.1
+    let action0 = ()=>{snake1.vx=-1;snake1.vy=0;}
+    let action1 = ()=>{snake1.vx=0;snake1.vy=-1;}
+    let action2 = ()=>{snake1.vx=1;snake1.vy=0;}
+    let action3 = ()=>{snake1.vx=0;snake1.vy=1;}
+    let action4 = ()=>{
+    }
+    var actions = [action0,action1,action2,action3,action4]
+    gameScreen2.update()
+    network1.forward_randomAction(gameScreen2.value2D)
+    //override the prototype
+    gameScreen2.update = function(){
+
+      if(snake1.gotreward==true){
+        network1.backward(gameScreen2.value2D, 1)//
+        snake1.gotreward=false
+      }else{
+        network1.backward(gameScreen2.value2D, 0)//
+      }
+
+      if(Math.random()<snake1.randomChance){
+        network1.forward_randomAction(gameScreen2.value2D)
+      }else {
+        network1.forward_bestAction(gameScreen2.value2D)
+      }
+      gameScreen.prototype.update.bind(gameScreen2).call()
+      snake1.count++
+
+    }
+
+    //==============End of Instance=============
+    function game2() {
+      frameCount++
+      //game data/state manipulation
+      gameScreen2.update()
+      //==================Render================
+      gameScreen2.dataRender()//generate the data needed to render
+
+      gameScreen2.value2D
+        .map((_a,i)=>{//render
+          _a.map(  (_b,j)=> {
+            _b.map((_,k)=>{
+              //this.value2D[i][j][k]
+              ctx2.fillStyle='rgb('+gameScreen2.value2D[i][j][0]+','+gameScreen2.value2D[i][j][1]+','+gameScreen2.value2D[i][j][2]+')';
+              ctx2.fillRect(i*gridSize, j*gridSize,gridSize-2,gridSize-2)
+            })
+          })
+      })
+      //==============End of Render================
+
+    }
+
+    function keyPush(evt) {
+        switch(evt.keyCode) {
+            case 37:
+                snake1.vx=-1;snake1.vy=0;
+                break;
+            case 38:
+                snake1.vx=0;snake1.vy=-1;
+                break;
+            case 39:
+                snake1.vx=1;snake1.vy=0;
+                break;
+            case 40:
+                snake1.vx=0;snake1.vy=1;
+                break;
+    		    case 32:
+
+                break;
+        }
+    }
+    </script>
+
+  </body>
+</html>
