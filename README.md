@@ -1,5 +1,5 @@
 # snakeWithConvNet
-Open: download the file -> open "snake_clean.html"
+To start: download the file -> open "snake_clean.html"
 
 
 
